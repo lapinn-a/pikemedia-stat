@@ -69,12 +69,10 @@ func (resolution *Resolution) UnmarshalJSON(data []byte) error {
 	split := strings.Split(s, "x")
 	resolution.X, err = strconv.Atoi(split[0])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "UnmarshalJSON failed: %v\n", err)
 		return err
 	}
 	resolution.Y, err = strconv.Atoi(split[1])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "UnmarshalJSON failed: %v\n", err)
 		return err
 	}
 	return nil
@@ -106,12 +104,10 @@ func (browserClient *BrowserClient) UnmarshalJSON(data []byte) error {
 }
 
 func ping(w http.ResponseWriter, r *http.Request) {
-	fmt.Printf("got /ping request\n")
 	w.Header().Set("Content-Type", "application/json")
 	err := json.NewEncoder(w).Encode(map[string]string{"status": "up"})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ping failed: %v\n", err)
-		os.Exit(1)
 	}
 }
 
@@ -121,13 +117,13 @@ func stat(conn *pgx.Conn, startTime time.Time) func(w http.ResponseWriter, r *ht
 		var Count int
 		err := conn.QueryRow(context.Background(), `select count(*) from "stats"`).Scan(&Count)
 		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintf(os.Stderr, "stat failed: %v\n", err)
-			os.Exit(1)
+			return
 		}
 		err = json.NewEncoder(w).Encode(map[string]any{"count": Count, "uptime": time.Since(startTime).Seconds()})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "stat failed: %v\n", err)
-			os.Exit(1)
 		}
 	}
 }
@@ -136,13 +132,18 @@ func collect(conn *pgx.Conn) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		sqlStr := `INSERT INTO stats("viewerId","name","lastName","isChatName","email","isChatEmail","joinTime","leaveTime","spentTime","spentTimeDeltaPercent","chatCommentsTotal","chatCommentsDeltaPercent","anotherFields","userIP","userRegion","userProvider","platformName","platformVersion","platformArchitecture","browserClientName","browserClientVersion","screenData_viewPortX","screenData_viewPortY","screenData_resolutionX","screenData_resolutionY") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`
-		fmt.Printf("got /collect request\n")
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "collect failed: %v\n", err)
-			os.Exit(1)
+			w.WriteHeader(http.StatusBadRequest)
+			err = json.NewEncoder(w).Encode(map[string]string{"result": "failed"})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "collect failed: %v\n", err)
+				os.Exit(1)
+			}
+			return
 		}
-		targets := []Viewer{}
+		var targets []Viewer
 
 		err = json.Unmarshal(body, &targets)
 		if err != nil {
@@ -157,7 +158,6 @@ func collect(conn *pgx.Conn) func(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for _, t := range targets {
-			fmt.Println(t.ViewerId, "-", t.Name)
 			client := ipinfo.NewClient(nil, nil, "887d18d82ff5e2")
 			info, err := client.GetIPInfo(net.ParseIP(t.UserIP))
 			if err != nil {
@@ -168,8 +168,8 @@ func collect(conn *pgx.Conn) func(w http.ResponseWriter, r *http.Request) {
 			}
 			_, err = conn.Exec(context.Background(), sqlStr, t.ViewerId, t.Name, t.LastName, t.IsChatName, t.Email, t.IsChatEmail, t.JoinTime, t.LeaveTime, t.SpentTime, t.SpentTimeDeltaPercent, t.ChatCommentsTotal, t.ChatCommentsDeltaPercent, t.AnotherFields, t.UserIP, t.UserRegion, t.UserProvider, t.Platform.Name, t.Platform.Version, t.Platform.Architecture, t.BrowserClient.Name, t.BrowserClient.Version /**/, t.ScreenDataViewPort.X, t.ScreenDataViewPort.Y /**/, t.ScreenDataResolution.X, t.ScreenDataResolution.Y)
 			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprintf(os.Stderr, "collect failed: %v\n", err)
-				os.Exit(1)
 			}
 		}
 
@@ -181,10 +181,32 @@ func collect(conn *pgx.Conn) func(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func countPeaks(rows pgx.Rows) (peakStartTime time.Time, peakEndTime time.Time, peakCount int) {
+	var currentCount int
+
+	for rows.Next() {
+		var timeValue time.Time
+		var change int
+		err := rows.Scan(&timeValue, &change)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		currentCount += change
+		if currentCount > peakCount {
+			peakCount = currentCount
+			peakStartTime = timeValue
+			peakEndTime = peakStartTime
+		} else if peakEndTime == peakStartTime {
+			peakEndTime = timeValue
+		}
+	}
+	return peakStartTime, peakEndTime, peakCount
+}
+
 func report(conn *pgx.Conn) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Printf("got /report request\n")
-
+		w.Header().Set("Content-Type", "text/csv")
 		var sqlStr string
 		var rows pgx.Rows
 		var err error
@@ -209,21 +231,41 @@ func report(conn *pgx.Conn) func(w http.ResponseWriter, r *http.Request) {
 				sqlStr = `SELECT "userRegion", count(*) FROM "stats" GROUP BY "userRegion"`
 			case "userProvider":
 				sqlStr = `SELECT "userProvider", count(*) FROM "stats" GROUP BY "userProvider"`
+			case "viewsPeaks":
+				sqlStr = `SELECT "joinTime", 1 FROM stats UNION ALL SELECT "leaveTime", -1 FROM stats ORDER BY "joinTime"`
+				rows, err = conn.Query(context.Background(), sqlStr)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprintf(os.Stderr, "report failed: %v\n", err)
+					return
+				}
+				peakStartTime, peakEndTime, peakCount := countPeaks(rows)
+				fmt.Fprintf(w, "startTime,endTime,count\n%v,%v,%v", peakStartTime, peakEndTime, peakCount)
+				return
+			default:
+				w.WriteHeader(http.StatusBadRequest)
+				_, err = fmt.Fprintf(w, "failed")
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "report failed: %v\n", err)
+					os.Exit(1)
+				}
+				return
 			}
 			rows, err = conn.Query(context.Background(), sqlStr)
 		} else {
 			w.WriteHeader(http.StatusBadRequest)
 			_, err = fmt.Fprintf(w, "failed")
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "collect failed: %v\n", err)
+				fmt.Fprintf(os.Stderr, "report failed: %v\n", err)
 				os.Exit(1)
 			}
 			return
 		}
 
 		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintf(os.Stderr, "report failed: %v\n", err)
-			os.Exit(1)
+			return
 		}
 		defer rows.Close()
 
@@ -234,7 +276,9 @@ func report(conn *pgx.Conn) func(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			err := rows.Scan(&name, &cnt)
 			if err != nil {
-				log.Fatal(err)
+				w.WriteHeader(http.StatusInternalServerError)
+				fmt.Fprintf(os.Stderr, "report failed: %v\n", err)
+				return
 			}
 			_, err = fmt.Fprintf(w, "\n%v,%v", name, cnt)
 			if err != nil {
@@ -261,7 +305,7 @@ func main() {
 	mux.HandleFunc("/collect", collect(conn))
 	mux.HandleFunc("/report", report(conn))
 
-	err = http.ListenAndServe(":80", mux)
+	err = http.ListenAndServe(":81", mux)
 
 	if errors.Is(err, http.ErrServerClosed) {
 		fmt.Printf("server closed\n")
