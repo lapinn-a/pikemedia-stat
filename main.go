@@ -168,8 +168,9 @@ func collect(conn *pgx.Conn) func(w http.ResponseWriter, r *http.Request) {
 			}
 			_, err = conn.Exec(context.Background(), sqlStr, t.ViewerId, t.Name, t.LastName, t.IsChatName, t.Email, t.IsChatEmail, t.JoinTime, t.LeaveTime, t.SpentTime, t.SpentTimeDeltaPercent, t.ChatCommentsTotal, t.ChatCommentsDeltaPercent, t.AnotherFields, t.UserIP, t.UserRegion, t.UserProvider, t.Platform.Name, t.Platform.Version, t.Platform.Architecture, t.BrowserClient.Name, t.BrowserClient.Version /**/, t.ScreenDataViewPort.X, t.ScreenDataViewPort.Y /**/, t.ScreenDataResolution.X, t.ScreenDataResolution.Y)
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
+				w.WriteHeader(http.StatusBadRequest)
 				fmt.Fprintf(os.Stderr, "collect failed: %v\n", err)
+				return
 			}
 		}
 
