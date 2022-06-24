@@ -19,7 +19,7 @@ func main() {
 	defer func(conn *pgx.Conn, ctx context.Context) {
 		err := conn.Close(ctx)
 		if err != nil {
-
+			log.Printf("Error closing database connection\n")
 		}
 	}(conn, context.Background())
 
