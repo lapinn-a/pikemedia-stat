@@ -3,30 +3,32 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"github.com/jackc/pgx/v4"
+	"log"
 	"net/http"
-	"os"
 	"time"
 )
 
 func main() {
 	startTime := time.Now()
-	urlExample := "postgres://postgres:123@localhost:5432/postgres"
+	urlExample := "postgres://postgres:123@localhost:5432/postgres8"
 	conn, err := pgx.Connect(context.Background(), urlExample)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("FATAL: Unable to connect to database: %v\n", err)
 	}
-	defer conn.Close(context.Background())
+	defer func(conn *pgx.Conn, ctx context.Context) {
+		err := conn.Close(ctx)
+		if err != nil {
+
+		}
+	}(conn, context.Background())
 
 	stat := NewStat(conn, startTime)
 	err = http.ListenAndServe(":81", stat.Router())
 
 	if errors.Is(err, http.ErrServerClosed) {
-		fmt.Printf("server closed\n")
+		log.Printf("Server closed\n")
 	} else if err != nil {
-		fmt.Printf("error starting server: %s\n", err)
-		os.Exit(1)
+		log.Fatalf("FATAL: Error starting server: %s\n", err)
 	}
 }

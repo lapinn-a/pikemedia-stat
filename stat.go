@@ -111,26 +111,26 @@ func (browserClient *BrowserClient) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (stat *Stat) Ping(w http.ResponseWriter, r *http.Request) {
+func (stat *Stat) Ping(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	err := json.NewEncoder(w).Encode(map[string]string{"status": "up"})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ping failed: %v\n", err)
+		log.Printf("Ping failed: %v\n", err)
 	}
 }
 
-func (stat *Stat) Stats(w http.ResponseWriter, r *http.Request) {
+func (stat *Stat) Stats(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	var Count int
 	err := stat.conn.QueryRow(context.Background(), `select count(*) from "stats"`).Scan(&Count)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(os.Stderr, "stat failed: %v\n", err)
+		log.Printf("Stats failed: %v\n", err)
 		return
 	}
 	err = json.NewEncoder(w).Encode(map[string]any{"count": Count, "uptime": time.Since(stat.startTime).Seconds()})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "stat failed: %v\n", err)
+		log.Printf("Stats failed: %v\n", err)
 	}
 }
 
@@ -139,12 +139,11 @@ func (stat *Stat) Collect(w http.ResponseWriter, r *http.Request) {
 	sqlStr := `INSERT INTO stats("viewerId","name","lastName","isChatName","email","isChatEmail","joinTime","leaveTime","spentTime","spentTimeDeltaPercent","chatCommentsTotal","chatCommentsDeltaPercent","anotherFields","userIP","userRegion","userProvider","platformName","platformVersion","platformArchitecture","browserClientName","browserClientVersion","screenData_viewPortX","screenData_viewPortY","screenData_resolutionX","screenData_resolutionY") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "collect failed: %v\n", err)
+		log.Printf("Collect failed: %v\n", err)
 		w.WriteHeader(http.StatusBadRequest)
 		err = json.NewEncoder(w).Encode(map[string]string{"result": "failed"})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "collect failed: %v\n", err)
-			os.Exit(1)
+			log.Fatalf("FATAL: Collect failed: %v\n", err)
 		}
 		return
 	}
@@ -152,12 +151,11 @@ func (stat *Stat) Collect(w http.ResponseWriter, r *http.Request) {
 
 	err = json.Unmarshal(body, &targets)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "collect failed: %v\n", err)
+		log.Printf("Collect failed: %v\n", err)
 		w.WriteHeader(http.StatusBadRequest)
 		err = json.NewEncoder(w).Encode(map[string]string{"result": "failed"})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "collect failed: %v\n", err)
-			os.Exit(1)
+			log.Fatalf("FATAL: Collect failed: %v\n", err)
 		}
 		return
 	}
@@ -166,7 +164,7 @@ func (stat *Stat) Collect(w http.ResponseWriter, r *http.Request) {
 		client := ipinfo.NewClient(nil, nil, "887d18d82ff5e2")
 		info, err := client.GetIPInfo(net.ParseIP(t.UserIP))
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "GetIPInfo failed: %v\n", err)
+			log.Printf("GetIPInfo failed: %v\n", err)
 		} else {
 			t.UserRegion = info.Region
 			t.UserProvider = info.Org
@@ -174,14 +172,14 @@ func (stat *Stat) Collect(w http.ResponseWriter, r *http.Request) {
 		_, err = stat.conn.Exec(context.Background(), sqlStr, t.ViewerId, t.Name, t.LastName, t.IsChatName, t.Email, t.IsChatEmail, t.JoinTime, t.LeaveTime, t.SpentTime, t.SpentTimeDeltaPercent, t.ChatCommentsTotal, t.ChatCommentsDeltaPercent, t.AnotherFields, t.UserIP, t.UserRegion, t.UserProvider, t.Platform.Name, t.Platform.Version, t.Platform.Architecture, t.BrowserClient.Name, t.BrowserClient.Version /**/, t.ScreenDataViewPort.X, t.ScreenDataViewPort.Y /**/, t.ScreenDataResolution.X, t.ScreenDataResolution.Y)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(os.Stderr, "collect failed: %v\n", err)
+			log.Printf("Collect failed: %v\n", err)
 			return
 		}
 	}
 
 	err = json.NewEncoder(w).Encode(map[string]string{"result": "success"})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "collect failed: %v\n", err)
+		log.Printf("Collect failed: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -240,18 +238,21 @@ func (stat *Stat) Report(w http.ResponseWriter, r *http.Request) {
 			rows, err = stat.conn.Query(context.Background(), sqlStr)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(os.Stderr, "report failed: %v\n", err)
+				log.Printf("Report failed: %v\n", err)
 				return
 			}
 			peakStartTime, peakEndTime, peakCount := countPeaks(rows)
-			fmt.Fprintf(w, "startTime,endTime,count\n%v,%v,%v", peakStartTime, peakEndTime, peakCount)
+			_, err = fmt.Fprintf(w, "startTime,endTime,count\n%v,%v,%v", peakStartTime, peakEndTime, peakCount)
+			if err != nil {
+				log.Printf("Report failed: %v\n", err)
+				return
+			}
 			return
 		default:
 			w.WriteHeader(http.StatusBadRequest)
 			_, err = fmt.Fprintf(w, "failed")
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "report failed: %v\n", err)
-				os.Exit(1)
+				log.Fatalf("FATAL: Report failed: %v\n", err)
 			}
 			return
 		}
@@ -260,15 +261,14 @@ func (stat *Stat) Report(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		_, err = fmt.Fprintf(w, "failed")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "report failed: %v\n", err)
-			os.Exit(1)
+			log.Fatalf("FATAL: Report failed: %v\n", err)
 		}
 		return
 	}
 
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(os.Stderr, "report failed: %v\n", err)
+		log.Printf("Report failed: %v\n", err)
 		return
 	}
 	defer rows.Close()
@@ -276,18 +276,21 @@ func (stat *Stat) Report(w http.ResponseWriter, r *http.Request) {
 	var name string
 	var cnt int
 
-	fmt.Fprintf(w, "%s,count", r.URL.Query().Get("column"))
+	_, err = fmt.Fprintf(w, "%s,count", r.URL.Query().Get("column"))
+	if err != nil {
+		log.Printf("Report failed: %v\n", err)
+		return
+	}
 	for rows.Next() {
 		err := rows.Scan(&name, &cnt)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(os.Stderr, "report failed: %v\n", err)
+			log.Printf("Report failed: %v\n", err)
 			return
 		}
 		_, err = fmt.Fprintf(w, "\n%v,%v", name, cnt)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "report failed: %v\n", err)
-			os.Exit(1)
+			log.Fatalf("FATAL: Report failed: %v\n", err)
 		}
 	}
 }
