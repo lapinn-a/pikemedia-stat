@@ -11,7 +11,7 @@ import (
 
 func main() {
 	startTime := time.Now()
-	urlExample := "postgres://postgres:123@localhost:5432/postgres8"
+	urlExample := "postgres://postgres:123@localhost:5432/postgres"
 	conn, err := pgx.Connect(context.Background(), urlExample)
 	if err != nil {
 		log.Fatalf("FATAL: Unable to connect to database: %v\n", err)
