@@ -1,11 +1,10 @@
 package main
 
 import (
-	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"github.com/ipinfo/go/v2/ipinfo"
-	"github.com/jackc/pgx/v4"
 	"io/ioutil"
 	"log"
 	"net"
@@ -17,11 +16,11 @@ import (
 )
 
 type Stat struct {
-	conn      *pgx.Conn
+	conn      *sql.DB
 	startTime time.Time
 }
 
-func NewStat(conn *pgx.Conn, startTime time.Time) *Stat {
+func NewStat(conn *sql.DB, startTime time.Time) *Stat {
 	return &Stat{conn: conn, startTime: startTime}
 }
 
@@ -122,7 +121,7 @@ func (stat *Stat) Ping(w http.ResponseWriter, _ *http.Request) {
 func (stat *Stat) Stats(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	var Count int
-	err := stat.conn.QueryRow(context.Background(), `select count(*) from "stats"`).Scan(&Count)
+	err := stat.conn.QueryRow(`select count(*) from "stats"`).Scan(&Count)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		log.Printf("Stats failed: %v\n", err)
@@ -169,7 +168,7 @@ func (stat *Stat) Collect(w http.ResponseWriter, r *http.Request) {
 			t.UserRegion = info.Region
 			t.UserProvider = info.Org
 		}
-		_, err = stat.conn.Exec(context.Background(), sqlStr, t.ViewerId, t.Name, t.LastName, t.IsChatName, t.Email, t.IsChatEmail, t.JoinTime, t.LeaveTime, t.SpentTime, t.SpentTimeDeltaPercent, t.ChatCommentsTotal, t.ChatCommentsDeltaPercent, t.AnotherFields, t.UserIP, t.UserRegion, t.UserProvider, t.Platform.Name, t.Platform.Version, t.Platform.Architecture, t.BrowserClient.Name, t.BrowserClient.Version /**/, t.ScreenDataViewPort.X, t.ScreenDataViewPort.Y /**/, t.ScreenDataResolution.X, t.ScreenDataResolution.Y)
+		_, err = stat.conn.Exec(sqlStr, t.ViewerId, t.Name, t.LastName, t.IsChatName, t.Email, t.IsChatEmail, t.JoinTime, t.LeaveTime, t.SpentTime, t.SpentTimeDeltaPercent, t.ChatCommentsTotal, t.ChatCommentsDeltaPercent, t.AnotherFields, t.UserIP, t.UserRegion, t.UserProvider, t.Platform.Name, t.Platform.Version, t.Platform.Architecture, t.BrowserClient.Name, t.BrowserClient.Version /**/, t.ScreenDataViewPort.X, t.ScreenDataViewPort.Y /**/, t.ScreenDataResolution.X, t.ScreenDataResolution.Y)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			log.Printf("Collect failed: %v\n", err)
@@ -184,7 +183,7 @@ func (stat *Stat) Collect(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func countPeaks(rows pgx.Rows) (peakStartTime time.Time, peakEndTime time.Time, peakCount int) {
+func countPeaks(rows *sql.Rows) (peakStartTime time.Time, peakEndTime time.Time, peakCount int) {
 	var currentCount int
 
 	for rows.Next() {
@@ -210,15 +209,15 @@ func countPeaks(rows pgx.Rows) (peakStartTime time.Time, peakEndTime time.Time, 
 func (stat *Stat) Report(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/csv")
 	var sqlStr string
-	var rows pgx.Rows
+	var rows *sql.Rows
 	var err error
 
 	if r.URL.Query().Has("platformName") {
 		sqlStr = `SELECT "platformVersion", count(*) FROM "stats" WHERE "platformName" = $1 GROUP BY "platformVersion"`
-		rows, err = stat.conn.Query(context.Background(), sqlStr, r.URL.Query().Get("platformName"))
+		rows, err = stat.conn.Query(sqlStr, r.URL.Query().Get("platformName"))
 	} else if r.URL.Query().Has("browserClientName") {
 		sqlStr = `SELECT "browserClientVersion", count(*) FROM "stats" WHERE "browserClientName" = $1 GROUP BY "browserClientVersion"`
-		rows, err = stat.conn.Query(context.Background(), sqlStr, r.URL.Query().Get("browserClientName"))
+		rows, err = stat.conn.Query(sqlStr, r.URL.Query().Get("browserClientName"))
 	} else if r.URL.Query().Has("column") {
 		switch r.URL.Query().Get("column") {
 		case "platformName":
@@ -235,7 +234,7 @@ func (stat *Stat) Report(w http.ResponseWriter, r *http.Request) {
 			sqlStr = `SELECT "userProvider", count(*) FROM "stats" GROUP BY "userProvider"`
 		case "viewsPeaks":
 			sqlStr = `SELECT "joinTime", 1 FROM stats UNION ALL SELECT "leaveTime", -1 FROM stats ORDER BY "joinTime"`
-			rows, err = stat.conn.Query(context.Background(), sqlStr)
+			rows, err = stat.conn.Query(sqlStr)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				log.Printf("Report failed: %v\n", err)
@@ -256,7 +255,7 @@ func (stat *Stat) Report(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		rows, err = stat.conn.Query(context.Background(), sqlStr)
+		rows, err = stat.conn.Query(sqlStr)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		_, err = fmt.Fprintf(w, "failed")
