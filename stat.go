@@ -90,9 +90,13 @@ func (platform *Platform) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	split := strings.Split(s, " ")
-	platform.Architecture = split[len(split)-1]
-	platform.Version = split[len(split)-2]
-	platform.Name = s[0 : len(s)-len(platform.Architecture)-len(platform.Version)-2]
+	if len(split) > 3 {
+		platform.Architecture = split[len(split)-1]
+		platform.Version = split[len(split)-2]
+		platform.Name = s[0 : len(s)-len(platform.Architecture)-len(platform.Version)-2]
+	} else {
+		platform.Name = s
+	}
 	return nil
 }
 
@@ -103,13 +107,17 @@ func (browserClient *BrowserClient) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	split := strings.Split(s, " ")
-	browserClient.Version = split[len(split)-1]
-	browserClient.Name = s[0 : len(s)-len(browserClient.Version)-1]
+	if len(split) == 2 {
+		browserClient.Version = split[len(split)-1]
+		browserClient.Name = s[0 : len(s)-len(browserClient.Version)-1]
+	} else {
+		browserClient.Name = s
+	}
 	return nil
 }
 
 func (stat *Stat) Ping(c *gin.Context) {
-	c.JSON(http.StatusBadRequest, gin.H{"status": "up"})
+	c.JSON(http.StatusOK, gin.H{"status": "up"})
 }
 
 func (stat *Stat) Stats(c *gin.Context) {
@@ -178,7 +186,7 @@ func countPeaks(rows *sql.Rows) (peakStartTime time.Time, peakEndTime time.Time,
 		timeValue, err = time.Parse(time.RFC3339, timeValueString)
 		if err != nil {
 			log.Printf("countPeaks failed: %v\n", err)
-			return
+			continue
 		}
 		currentCount += change
 		if currentCount > peakCount {
