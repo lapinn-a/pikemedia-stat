@@ -1,0 +1,28 @@
+CREATE TABLE IF NOT EXISTS stats
+(
+    "viewerId" integer PRIMARY KEY,
+    name character varying(256),
+    "lastName" character varying(256),
+    "isChatName" boolean,
+    email character varying(256),
+    "isChatEmail" boolean,
+    "joinTime" TIMESTAMP WITH TIME ZONE,
+    "leaveTime" TIMESTAMP WITH TIME ZONE,
+    "spentTime" bigint,
+    "spentTimeDeltaPercent" smallint,
+    "chatCommentsTotal" integer,
+    "chatCommentsDeltaPercent" smallint,
+    "anotherFields" blob,
+    "userIP" character varying(15),
+    "userRegion" character varying(32),
+    "userProvider" character varying(32),
+    "platformName" character varying(32),
+    "platformVersion" character varying(32),
+    "platformArchitecture" character varying(32),
+    "browserClientName" character varying(32),
+    "browserClientVersion" character varying(32),
+    "screenData_viewPortX" smallint,
+    "screenData_viewPortY" smallint,
+    "screenData_resolutionX" smallint,
+    "screenData_resolutionY" smallint
+)
