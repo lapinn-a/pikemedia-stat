@@ -185,7 +185,7 @@ func countPeaks(rows *sql.Rows) (peakStartTime time.Time, peakEndTime time.Time,
 		}
 		timeValue, err = time.Parse(time.RFC3339, timeValueString)
 		if err != nil {
-			log.Printf("countPeaks failed: %v\n", err)
+			log.Printf("countPeaks error: %v\n", err)
 			continue
 		}
 		currentCount += change
