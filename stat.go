@@ -168,7 +168,8 @@ func (stat *Stat) Collect(w http.ResponseWriter, r *http.Request) {
 			t.UserRegion = info.Region
 			t.UserProvider = info.Org
 		}
-		_, err = stat.conn.Exec(sqlStr, t.ViewerId, t.Name, t.LastName, t.IsChatName, t.Email, t.IsChatEmail, t.JoinTime, t.LeaveTime, t.SpentTime, t.SpentTimeDeltaPercent, t.ChatCommentsTotal, t.ChatCommentsDeltaPercent, t.AnotherFields, t.UserIP, t.UserRegion, t.UserProvider, t.Platform.Name, t.Platform.Version, t.Platform.Architecture, t.BrowserClient.Name, t.BrowserClient.Version /**/, t.ScreenDataViewPort.X, t.ScreenDataViewPort.Y /**/, t.ScreenDataResolution.X, t.ScreenDataResolution.Y)
+		anotherFields, _ := json.Marshal(t.AnotherFields)
+		_, err = stat.conn.Exec(sqlStr, t.ViewerId, t.Name, t.LastName, t.IsChatName, t.Email, t.IsChatEmail, t.JoinTime, t.LeaveTime, t.SpentTime, t.SpentTimeDeltaPercent, t.ChatCommentsTotal, t.ChatCommentsDeltaPercent, anotherFields, t.UserIP, t.UserRegion, t.UserProvider, t.Platform.Name, t.Platform.Version, t.Platform.Architecture, t.BrowserClient.Name, t.BrowserClient.Version, t.ScreenDataViewPort.X, t.ScreenDataViewPort.Y, t.ScreenDataResolution.X, t.ScreenDataResolution.Y)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			log.Printf("Collect failed: %v\n", err)
@@ -187,13 +188,19 @@ func countPeaks(rows *sql.Rows) (peakStartTime time.Time, peakEndTime time.Time,
 	var currentCount int
 
 	for rows.Next() {
+		var timeValueString string
 		var timeValue time.Time
 		var change int
-		err := rows.Scan(&timeValue, &change)
+		err := rows.Scan(&timeValueString, &change)
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("countPeaks failed: %v\n", err)
+			return
 		}
-
+		timeValue, err = time.Parse(time.RFC3339, timeValueString)
+		if err != nil {
+			log.Printf("countPeaks failed: %v\n", err)
+			return
+		}
 		currentCount += change
 		if currentCount > peakCount {
 			peakCount = currentCount
@@ -225,9 +232,9 @@ func (stat *Stat) Report(w http.ResponseWriter, r *http.Request) {
 		case "browserClientName":
 			sqlStr = `SELECT "browserClientName", count(*) FROM "stats" GROUP BY "browserClientName"`
 		case "browserClient":
-			sqlStr = `SELECT CONCAT("browserClientName", ' ', "browserClientVersion") AS browserClient, count(*) FROM "stats" GROUP BY browserClient`
+			sqlStr = `SELECT "browserClientName" || ' ' || "browserClientVersion" AS browserClient, count(*) FROM "stats" GROUP BY browserClient`
 		case "screenData_resolution":
-			sqlStr = `SELECT CONCAT("screenData_resolutionX", 'x', "screenData_resolutionY") as screenData_resolution, count(*) FROM "stats" GROUP BY screenData_resolution`
+			sqlStr = `SELECT "screenData_resolutionX" || 'x' || "screenData_resolutionY" as screenData_resolution, count(*) FROM "stats" GROUP BY screenData_resolution`
 		case "userRegion":
 			sqlStr = `SELECT "userRegion", count(*) FROM "stats" GROUP BY "userRegion"`
 		case "userProvider":
