@@ -247,7 +247,7 @@ func (stat *Stat) Report(c *gin.Context) {
 	defer func(rows *sql.Rows) {
 		err := rows.Close()
 		if err != nil {
-
+			log.Printf("Close failed: %v\n", err)
 		}
 	}(rows)
 
