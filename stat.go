@@ -3,13 +3,11 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
+	"github.com/gin-gonic/gin"
 	"github.com/ipinfo/go/v2/ipinfo"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -110,52 +108,37 @@ func (browserClient *BrowserClient) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (stat *Stat) Ping(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	err := json.NewEncoder(w).Encode(map[string]string{"status": "up"})
-	if err != nil {
-		log.Printf("Ping failed: %v\n", err)
-	}
+func (stat *Stat) Ping(c *gin.Context) {
+	c.JSON(http.StatusBadRequest, gin.H{"status": "up"})
 }
 
-func (stat *Stat) Stats(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+func (stat *Stat) Stats(c *gin.Context) {
 	var Count int
 	err := stat.conn.QueryRow(`select count(*) from "stats"`).Scan(&Count)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		c.String(http.StatusInternalServerError, "Internal server error")
 		log.Printf("Stats failed: %v\n", err)
 		return
 	}
-	err = json.NewEncoder(w).Encode(map[string]any{"count": Count, "uptime": time.Since(stat.startTime).Seconds()})
-	if err != nil {
-		log.Printf("Stats failed: %v\n", err)
-	}
+	c.JSON(http.StatusBadRequest, gin.H{"count": Count, "uptime": time.Since(stat.startTime).Seconds()})
 }
 
-func (stat *Stat) Collect(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+func (stat *Stat) Collect(c *gin.Context) {
 	sqlStr := `INSERT INTO stats("viewerId","name","lastName","isChatName","email","isChatEmail","joinTime","leaveTime","spentTime","spentTimeDeltaPercent","chatCommentsTotal","chatCommentsDeltaPercent","anotherFields","userIP","userRegion","userProvider","platformName","platformVersion","platformArchitecture","browserClientName","browserClientVersion","screenData_viewPortX","screenData_viewPortY","screenData_resolutionX","screenData_resolutionY") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`
-	body, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Printf("Collect failed: %v\n", err)
-		w.WriteHeader(http.StatusBadRequest)
-		err = json.NewEncoder(w).Encode(map[string]string{"result": "failed"})
-		if err != nil {
-			log.Fatalf("FATAL: Collect failed: %v\n", err)
-		}
-		return
-	}
+	//body, err := ioutil.ReadAll(r.Body)
+	//if err != nil {
+	//	log.Printf("Collect failed: %v\n", err)
+	//	c.JSON(http.StatusBadRequest, gin.H{"result": "failed"})
+	//	return
+	//}
 	var targets []Viewer
 
-	err = json.Unmarshal(body, &targets)
+	//err = json.Unmarshal(body, &targets)
+
+	err := c.BindJSON(&targets)
 	if err != nil {
 		log.Printf("Collect failed: %v\n", err)
-		w.WriteHeader(http.StatusBadRequest)
-		err = json.NewEncoder(w).Encode(map[string]string{"result": "failed"})
-		if err != nil {
-			log.Fatalf("FATAL: Collect failed: %v\n", err)
-		}
+		c.JSON(http.StatusBadRequest, gin.H{"result": "failed"})
 		return
 	}
 
@@ -171,17 +154,13 @@ func (stat *Stat) Collect(w http.ResponseWriter, r *http.Request) {
 		anotherFields, _ := json.Marshal(t.AnotherFields)
 		_, err = stat.conn.Exec(sqlStr, t.ViewerId, t.Name, t.LastName, t.IsChatName, t.Email, t.IsChatEmail, t.JoinTime, t.LeaveTime, t.SpentTime, t.SpentTimeDeltaPercent, t.ChatCommentsTotal, t.ChatCommentsDeltaPercent, anotherFields, t.UserIP, t.UserRegion, t.UserProvider, t.Platform.Name, t.Platform.Version, t.Platform.Architecture, t.BrowserClient.Name, t.BrowserClient.Version, t.ScreenDataViewPort.X, t.ScreenDataViewPort.Y, t.ScreenDataResolution.X, t.ScreenDataResolution.Y)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
 			log.Printf("Collect failed: %v\n", err)
+			c.JSON(http.StatusBadRequest, gin.H{"result": "failed"})
 			return
 		}
 	}
 
-	err = json.NewEncoder(w).Encode(map[string]string{"result": "success"})
-	if err != nil {
-		log.Printf("Collect failed: %v\n", err)
-		os.Exit(1)
-	}
+	c.JSON(http.StatusOK, gin.H{"result": "success"})
 }
 
 func countPeaks(rows *sql.Rows) (peakStartTime time.Time, peakEndTime time.Time, peakCount int) {
@@ -213,20 +192,20 @@ func countPeaks(rows *sql.Rows) (peakStartTime time.Time, peakEndTime time.Time,
 	return peakStartTime, peakEndTime, peakCount
 }
 
-func (stat *Stat) Report(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/csv")
+func (stat *Stat) Report(c *gin.Context) {
+	c.Writer.Header().Set("Content-Type", "text/csv")
 	var sqlStr string
 	var rows *sql.Rows
 	var err error
 
-	if r.URL.Query().Has("platformName") {
+	if c.Query("platformName") != "" {
 		sqlStr = `SELECT "platformVersion", count(*) FROM "stats" WHERE "platformName" = $1 GROUP BY "platformVersion"`
-		rows, err = stat.conn.Query(sqlStr, r.URL.Query().Get("platformName"))
-	} else if r.URL.Query().Has("browserClientName") {
+		rows, err = stat.conn.Query(sqlStr, c.Query("platformName"))
+	} else if c.Query("browserClientName") != "" {
 		sqlStr = `SELECT "browserClientVersion", count(*) FROM "stats" WHERE "browserClientName" = $1 GROUP BY "browserClientVersion"`
-		rows, err = stat.conn.Query(sqlStr, r.URL.Query().Get("browserClientName"))
-	} else if r.URL.Query().Has("column") {
-		switch r.URL.Query().Get("column") {
+		rows, err = stat.conn.Query(sqlStr, c.Query("browserClientName"))
+	} else if c.Query("column") != "" {
+		switch c.Query("column") {
 		case "platformName":
 			sqlStr = `SELECT "platformName", count(*) FROM "stats" GROUP BY "platformName"`
 		case "browserClientName":
@@ -243,58 +222,47 @@ func (stat *Stat) Report(w http.ResponseWriter, r *http.Request) {
 			sqlStr = `SELECT "joinTime", 1 FROM stats UNION ALL SELECT "leaveTime", -1 FROM stats ORDER BY "joinTime"`
 			rows, err = stat.conn.Query(sqlStr)
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
+				c.String(http.StatusInternalServerError, "Internal server error")
 				log.Printf("Report failed: %v\n", err)
 				return
 			}
 			peakStartTime, peakEndTime, peakCount := countPeaks(rows)
-			_, err = fmt.Fprintf(w, "startTime,endTime,count\n%v,%v,%v", peakStartTime, peakEndTime, peakCount)
-			if err != nil {
-				log.Printf("Report failed: %v\n", err)
-				return
-			}
+			c.String(http.StatusOK, "startTime,endTime,count\n%v,%v,%v", peakStartTime, peakEndTime, peakCount)
 			return
 		default:
-			w.WriteHeader(http.StatusBadRequest)
-			_, err = fmt.Fprintf(w, "failed")
-			if err != nil {
-				log.Fatalf("FATAL: Report failed: %v\n", err)
-			}
+			c.String(http.StatusBadRequest, "failed")
 			return
 		}
 		rows, err = stat.conn.Query(sqlStr)
 	} else {
-		w.WriteHeader(http.StatusBadRequest)
-		_, err = fmt.Fprintf(w, "failed")
-		if err != nil {
-			log.Fatalf("FATAL: Report failed: %v\n", err)
-		}
+		c.String(http.StatusBadRequest, "failed")
 		return
 	}
 
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		c.String(http.StatusInternalServerError, "failed")
 		log.Printf("Report failed: %v\n", err)
 		return
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+
+		}
+	}(rows)
 
 	var name string
 	var cnt int
 
-	_, err = fmt.Fprintf(w, "%s,count", r.URL.Query().Get("column"))
-	if err != nil {
-		log.Printf("Report failed: %v\n", err)
-		return
-	}
+	c.String(http.StatusOK, "%s,count", c.Query("column"))
 	for rows.Next() {
 		err := rows.Scan(&name, &cnt)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
+			c.String(http.StatusInternalServerError, "failed")
 			log.Printf("Report failed: %v\n", err)
 			return
 		}
-		_, err = fmt.Fprintf(w, "\n%v,%v", name, cnt)
+		c.String(http.StatusOK, "\n%v,%v", name, cnt)
 		if err != nil {
 			log.Fatalf("FATAL: Report failed: %v\n", err)
 		}
