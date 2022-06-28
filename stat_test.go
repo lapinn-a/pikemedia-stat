@@ -75,8 +75,8 @@ func (s *TestSuite) TestCollectIncorrectType() {
 }
 
 func (s *TestSuite) TestCollectNull() {
-	// platform is null
-	body := `[{"viewerId":12345,"name":"Роман","lastName":"XXXXX","isChatName":false,"email":"aaaa@pikemedia.ru","isChatEmail":false,"joinTime":"2021-07-30T15:37:24+03:00","leaveTime":"2021-07-30T15:45:43+03:00","spentTime":461000000000,"spentTimeDeltaPercent":14,"chatCommentsTotal":0,"chatCommentsDeltaPercent":0,"anotherFields":[],"browserClientInfo":{"userIP":"62.152.34.188","platform":null,"browserClient":"Chrome 92.0.4515.107","screenData_viewPort":"1440x900","screenData_resolution":"1440x900"}}]`
+	// lastName is null
+	body := `[{"viewerId":12345,"name":"Роман","lastName":null,"isChatName":false,"email":"aaaa@pikemedia.ru","isChatEmail":false,"joinTime":"2021-07-30T15:37:24+03:00","leaveTime":"2021-07-30T15:45:43+03:00","spentTime":461000000000,"spentTimeDeltaPercent":14,"chatCommentsTotal":0,"chatCommentsDeltaPercent":0,"anotherFields":[],"browserClientInfo":{"userIP":"62.152.34.188","platform":null,"browserClient":"Chrome 92.0.4515.107","screenData_viewPort":"1440x900","screenData_resolution":"1440x900"}}]`
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodPost, "/collect", strings.NewReader(body))
 	s.router.ServeHTTP(w, req)
@@ -87,6 +87,26 @@ func (s *TestSuite) TestCollectNull() {
 func (s *TestSuite) TestCollectAbsence() {
 	// lastName does not exists
 	body := `[{"viewerId":12346,"name":"Роман","isChatName":false,"email":"aaaa@pikemedia.ru","isChatEmail":false,"joinTime":"2021-07-30T15:37:24+03:00","leaveTime":"2021-07-30T15:45:43+03:00","spentTime":461000000000,"spentTimeDeltaPercent":14,"chatCommentsTotal":0,"chatCommentsDeltaPercent":0,"anotherFields":[],"browserClientInfo":{"userIP":"62.152.34.188","platform":"OS X 10.15.7 64-bit","browserClient":"Chrome 92.0.4515.107","screenData_viewPort":"1440x900","screenData_resolution":"1440x900"}}]`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/collect", strings.NewReader(body))
+	s.router.ServeHTTP(w, req)
+	assert.Equal(s.T(), http.StatusOK, w.Code)
+	assert.Equal(s.T(), "{\"result\":\"success\"}", w.Body.String())
+}
+
+func (s *TestSuite) TestCollectNullPointer() {
+	// platform is null
+	body := `[{"viewerId":12347,"name":"Роман","lastName":"XXXXX","isChatName":false,"email":"aaaa@pikemedia.ru","isChatEmail":false,"joinTime":"2021-07-30T15:37:24+03:00","leaveTime":"2021-07-30T15:45:43+03:00","spentTime":461000000000,"spentTimeDeltaPercent":14,"chatCommentsTotal":0,"chatCommentsDeltaPercent":0,"anotherFields":[],"browserClientInfo":{"userIP":"62.152.34.188","platform":null,"browserClient":"Chrome 92.0.4515.107","screenData_viewPort":"1440x900","screenData_resolution":"1440x900"}}]`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/collect", strings.NewReader(body))
+	s.router.ServeHTTP(w, req)
+	assert.Equal(s.T(), http.StatusOK, w.Code)
+	assert.Equal(s.T(), "{\"result\":\"success\"}", w.Body.String())
+}
+
+func (s *TestSuite) TestCollectAbsencePointer() {
+	// platform does not exists
+	body := `[{"viewerId":12348,"name":"Роман","isChatName":false,"email":"aaaa@pikemedia.ru","isChatEmail":false,"joinTime":"2021-07-30T15:37:24+03:00","leaveTime":"2021-07-30T15:45:43+03:00","spentTime":461000000000,"spentTimeDeltaPercent":14,"chatCommentsTotal":0,"chatCommentsDeltaPercent":0,"anotherFields":[],"browserClientInfo":{"userIP":"62.152.34.188","browserClient":"Chrome 92.0.4515.107","screenData_viewPort":"1440x900","screenData_resolution":"1440x900"}}]`
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodPost, "/collect", strings.NewReader(body))
 	s.router.ServeHTTP(w, req)

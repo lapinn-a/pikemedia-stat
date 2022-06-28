@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"github.com/gin-gonic/gin"
 	"github.com/ipinfo/go/v2/ipinfo"
 	"log"
@@ -28,14 +29,14 @@ type Resolution struct {
 }
 
 type Platform struct {
-	Name         string
-	Version      string
-	Architecture string
+	Name         *string
+	Version      *string
+	Architecture *string
 }
 
 type BrowserClient struct {
-	Name    string
-	Version string
+	Name    *string
+	Version *string
 }
 
 type BrowserClientInfo struct {
@@ -72,28 +73,36 @@ func (resolution *Resolution) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	split := strings.Split(s, "x")
-	resolution.X, err = strconv.Atoi(split[0])
-	if err != nil {
-		return err
-	}
-	resolution.Y, err = strconv.Atoi(split[1])
-	if err != nil {
-		return err
+	if len(split) > 1 {
+		resolution.X, err = strconv.Atoi(split[0])
+		if err != nil {
+			return err
+		}
+		resolution.Y, err = strconv.Atoi(split[1])
+		if err != nil {
+			return err
+		}
+	} else {
+		return errors.New("incorrect screen resolution")
 	}
 	return nil
 }
 
 func (platform *Platform) UnmarshalJSON(data []byte) error {
-	var s string
+	var s *string
 	err := json.Unmarshal(data, &s)
 	if err != nil {
 		return err
 	}
-	split := strings.Split(s, " ")
-	if len(split) > 3 {
-		platform.Architecture = split[len(split)-1]
-		platform.Version = split[len(split)-2]
-		platform.Name = s[0 : len(s)-len(platform.Architecture)-len(platform.Version)-2]
+	if s == nil {
+		return nil
+	}
+	split := strings.Split(*s, " ")
+	if len(split) > 2 {
+		platform.Architecture = &split[len(split)-1]
+		platform.Version = &split[len(split)-2]
+		name := (*s)[0 : len(*s)-len(*platform.Architecture)-len(*platform.Version)-2]
+		platform.Name = &name
 	} else {
 		platform.Name = s
 	}
@@ -101,15 +110,19 @@ func (platform *Platform) UnmarshalJSON(data []byte) error {
 }
 
 func (browserClient *BrowserClient) UnmarshalJSON(data []byte) error {
-	var s string
+	var s *string
 	err := json.Unmarshal(data, &s)
 	if err != nil {
 		return err
 	}
-	split := strings.Split(s, " ")
-	if len(split) == 2 {
-		browserClient.Version = split[len(split)-1]
-		browserClient.Name = s[0 : len(s)-len(browserClient.Version)-1]
+	if s == nil {
+		return nil
+	}
+	split := strings.Split(*s, " ")
+	if len(split) > 1 {
+		browserClient.Version = &split[len(split)-1]
+		name := (*s)[0 : len(*s)-len(*browserClient.Version)-1]
+		browserClient.Name = &name
 	} else {
 		browserClient.Name = s
 	}
@@ -133,15 +146,7 @@ func (stat *Stat) Stats(c *gin.Context) {
 
 func (stat *Stat) Collect(c *gin.Context) {
 	sqlStr := `INSERT INTO stats("viewerId","name","lastName","isChatName","email","isChatEmail","joinTime","leaveTime","spentTime","spentTimeDeltaPercent","chatCommentsTotal","chatCommentsDeltaPercent","anotherFields","userIP","userRegion","userProvider","platformName","platformVersion","platformArchitecture","browserClientName","browserClientVersion","screenData_viewPortX","screenData_viewPortY","screenData_resolutionX","screenData_resolutionY") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`
-	//body, err := ioutil.ReadAll(r.Body)
-	//if err != nil {
-	//	log.Printf("Collect failed: %v\n", err)
-	//	c.JSON(http.StatusBadRequest, gin.H{"result": "failed"})
-	//	return
-	//}
 	var targets []Viewer
-
-	//err = json.Unmarshal(body, &targets)
 
 	err := c.BindJSON(&targets)
 	if err != nil {
@@ -207,19 +212,19 @@ func (stat *Stat) Report(c *gin.Context) {
 	var err error
 
 	if c.Query("platformName") != "" {
-		sqlStr = `SELECT "platformVersion", count(*) FROM "stats" WHERE "platformName" = $1 GROUP BY "platformVersion"`
+		sqlStr = `SELECT COALESCE("platformVersion", "unknown"), count(*) FROM "stats" WHERE "platformName" = $1 GROUP BY "platformVersion"`
 		rows, err = stat.conn.Query(sqlStr, c.Query("platformName"))
 	} else if c.Query("browserClientName") != "" {
-		sqlStr = `SELECT "browserClientVersion", count(*) FROM "stats" WHERE "browserClientName" = $1 GROUP BY "browserClientVersion"`
+		sqlStr = `SELECT COALESCE("browserClientVersion", "unknown"), count(*) FROM "stats" WHERE "browserClientName" = $1 GROUP BY "browserClientVersion"`
 		rows, err = stat.conn.Query(sqlStr, c.Query("browserClientName"))
 	} else if c.Query("column") != "" {
 		switch c.Query("column") {
 		case "platformName":
-			sqlStr = `SELECT "platformName", count(*) FROM "stats" GROUP BY "platformName"`
+			sqlStr = `SELECT COALESCE("platformName", "unknown"), count(*) FROM "stats" GROUP BY "platformName"`
 		case "browserClientName":
-			sqlStr = `SELECT "browserClientName", count(*) FROM "stats" GROUP BY "browserClientName"`
+			sqlStr = `SELECT COALESCE("browserClientName", "unknown"), count(*) FROM "stats" GROUP BY "browserClientName"`
 		case "browserClient":
-			sqlStr = `SELECT "browserClientName" || ' ' || "browserClientVersion" AS browserClient, count(*) FROM "stats" GROUP BY browserClient`
+			sqlStr = `SELECT COALESCE("browserClientName", "unknown") || ' ' || COALESCE("browserClientVersion", "unknown") AS browserClient, count(*) FROM "stats" GROUP BY browserClient`
 		case "screenData_resolution":
 			sqlStr = `SELECT "screenData_resolutionX" || 'x' || "screenData_resolutionY" as screenData_resolution, count(*) FROM "stats" GROUP BY screenData_resolution`
 		case "userRegion":
